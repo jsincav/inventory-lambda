@@ -110,6 +110,35 @@ module.exports.addItemHandler = (event, context, callback) => {
 	});
 };
 
+module.exports.deleteItemHandler = (event, context, callback) => {
+	console.log(event);
+	const body = JSON.parse(event.body);
+	const item = body.data;
+	const { pool } = require('./db');
+	pool.connect((err, client) => {
+		if (err) {
+			console.log('connection error: ' + err);
+			callback(null, JSON.stringify(err));
+		}
+		client.query(`DELETE FROM devices WHERE id=${item.id} RETURNING id`, (err, result) => {
+			console.log(result);
+			client.release(true);
+			if (err) {
+				console.log('query error: ' + err);
+				callback(null, JSON.stringify(err));
+			}
+			addItemToAllConnected(event, JSON.stringify(result.rows[0]))
+				.then(() => {
+					callback(null, successfullResponse);
+				})
+				.catch((err) => {
+					console.log('send error: ' + err);
+					callback(null, JSON.stringify(err));
+				});
+		});
+	});
+};
+
 const addItemToAllConnected = (event, data) => {
 	return getConnectionIds().then((connectionData) => {
 		return connectionData.Items.map((connectionId) => {

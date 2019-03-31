@@ -42,6 +42,11 @@ functions:
     events:
       - websocket:
           route: addItem
+  deleteItemHandler:
+    handler: handler.deleteItemHandler
+    events:
+      - websocket:
+          route: deleteItem
 
 resources:
   Resources:
