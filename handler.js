@@ -56,19 +56,48 @@ module.exports.defaultHandler = (event, context, callback) => {
 module.exports.getInventoryHandler = (event, context, callback) => {
 	console.log(event);
 	const { pool } = require('./db');
-	pool.connect((err, client, release) => {
+	pool.connect((err, client) => {
 		if (err) {
-			pool.end().then(() => {
-				callback(null, JSON.stringify(err));
-			});
+			console.log('connection error: ' + err);
+			callback(null, JSON.stringify(err));
 		}
 		client.query('select * from devices', (err, result) => {
-			release();
-			pool.end().then(() => {
+			if (err) {
+				console.log('query error: ' + err);
+				callback(null, JSON.stringify(err));
+			}
+			client.release(true);
+			send(event, event.requestContext.connectionId, JSON.stringify(result.rows))
+				.then(() => {
+					callback(null, successfullResponse);
+				})
+				.catch((err) => {
+					console.log('send error: ' + err);
+					callback(null, JSON.stringify(err));
+				});
+		});
+	});
+};
+
+module.exports.addItemHandler = (event, context, callback) => {
+	console.log(event);
+	const body = JSON.parse(event.body);
+	const item = body.data;
+	const { pool } = require('./db');
+	pool.connect((err, client) => {
+		if (err) {
+			console.log('connection error: ' + err);
+			callback(null, JSON.stringify(err));
+		}
+		client.query(
+			`INSERT INTO devices(device_type, serial, date) VALUES('${item.device_type}', '${item.serial}', '${item.date}') RETURNING id, device_type, serial, date`,
+			(err, result) => {
+				client.release(true);
 				if (err) {
+					console.log('query error: ' + err);
 					callback(null, JSON.stringify(err));
 				}
-				send(event, event.requestContext.connectionId, JSON.stringify(result))
+				addItemToAllConnected(event, JSON.stringify(result.rows[0]))
 					.then(() => {
 						callback(null, successfullResponse);
 					})
@@ -76,56 +105,15 @@ module.exports.getInventoryHandler = (event, context, callback) => {
 						console.log('send error: ' + err);
 						callback(null, JSON.stringify(err));
 					});
-			});
-		});
+			}
+		);
 	});
 };
 
-module.exports.addItemHandler = (event, context, callback) => {
-	console.log(event);
-	console.log('data: ' + JSON.parse(event.body).data);
-	// {
-	// 	"eventType": "addItem",
-	// 	"data": {
-	// 		"id": 4,
-	// 		"device": "TouchTalk 4",
-	// 		"serial": "45345",
-	// 		"date": "12/25/2020"
-	// 	}
-	// }
-	//const { client } = require('./db');
-
-	// client
-	// 	.query(`INSERT INTO public.devices(device_type, serial, date) VALUES('TouchTalk', 't57876', '01/26/2018')`)
-	// 	.then((result) => {
-	// 		client.end();
-	// 		addItemToAllConnected(event)
-	// 			.then(() => {
-	// 				callback(null, successfullResponse);
-	// 			})
-	// 			.catch((err) => {
-	// 				callback(null, JSON.stringify(err));
-	// 			});
-	// 	})
-	// 	.catch((err) => {
-	// 		client.end();
-	// 		console.log('error: ' + err);
-	// 		callback(null, JSON.stringify(err));
-	// 	});
-
-	addItemToAllConnected(event)
-		.then(() => {
-			callback(null, successfullResponse);
-		})
-		.catch((err) => {
-			callback(null, JSON.stringify(err));
-		});
-};
-
-const addItemToAllConnected = (event) => {
+const addItemToAllConnected = (event, data) => {
 	return getConnectionIds().then((connectionData) => {
 		return connectionData.Items.map((connectionId) => {
-			return send(event, connectionId.connectionId, JSON.parse(event.body).data);
+			return send(event, connectionId.connectionId, data);
 		});
 	});
 };
@@ -140,6 +128,7 @@ const getConnectionIds = () => {
 };
 
 const send = (event, connectionId, data) => {
+	console.log('send data: ' + data);
 	const endpoint = event.requestContext.domainName + '/' + event.requestContext.stage;
 	const apigwManagementApi = new AWS.ApiGatewayManagementApi({
 		apiVersion: '2018-11-29',
